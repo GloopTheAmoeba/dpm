@@ -1,0 +1,110 @@
+import { GuildMember, TextChannel, PermissionFlagsBits, Role } from 'discord.js';
+import { DatabaseRepository } from '../database/repository.js';
+import { TelegramService } from './telegramService.js';
+import { DiscordMemberInfo } from '../types/index.js';
+import { buildDiscordJoinEmbed } from '../formatters/discordNotification.js';
+import { Logger } from '../utils/logger.js';
+
+export class MemberService {
+  /**
+   * Extracts member information from a Discord GuildMember object safely.
+   */
+  static extractMemberInfo(member: GuildMember): DiscordMemberInfo {
+    const user = member.user;
+    const guild = member.guild;
+
+    const accountCreatedAt = user?.createdAt || new Date(0);
+    const lastJoinedAt = member?.joinedAt || new Date();
+
+    let avatarUrl: string | null = null;
+    if (typeof member.displayAvatarURL === 'function') {
+      avatarUrl = member.displayAvatarURL({ extension: 'png', size: 256 });
+    } else if (typeof user?.displayAvatarURL === 'function') {
+      avatarUrl = user.displayAvatarURL({ extension: 'png', size: 256 });
+    }
+
+    return {
+      guildId: guild.id,
+      guildName: guild.name,
+      discordUserId: user.id,
+      username: user.username,
+      displayName: member.displayName || user.displayName || user.username,
+      globalName: user.globalName || null,
+      nickname: member.nickname || null,
+      avatarUrl: avatarUrl || null,
+      isBot: Boolean(user.bot),
+      accountCreatedAt,
+      lastJoinedAt,
+      memberCount: guild.memberCount,
+      roles: member.roles?.cache ? Array.from(member.roles.cache.values()).map((r: Role) => r.name) : [],
+    };
+  }
+
+  /**
+   * Process a member join event idempotently, persist data, send Discord notification, and notify Telegram owner.
+   */
+  static async processMemberJoin(member: GuildMember): Promise<boolean> {
+    const memberInfo = this.extractMemberInfo(member);
+    const eventId = `join_${memberInfo.guildId}_${memberInfo.discordUserId}_${memberInfo.lastJoinedAt.getTime()}`;
+
+    // Deduplication check using unique event ID in database
+    const isNewEvent = await DatabaseRepository.logEventIdempotent({
+      eventId,
+      eventType: 'GUILD_MEMBER_ADD',
+      guildId: memberInfo.guildId,
+      discordUserId: memberInfo.discordUserId,
+      details: {
+        username: memberInfo.username,
+        lastJoinedAt: memberInfo.lastJoinedAt.toISOString(),
+      },
+    });
+
+    if (!isNewEvent) {
+      Logger.info(`Duplicate member join event skipped: ${eventId}`);
+      return false;
+    }
+
+    // Persist member information in database
+    try {
+      await DatabaseRepository.upsertMember(memberInfo);
+    } catch (err) {
+      Logger.error(`Failed to save member ${memberInfo.discordUserId} to database:`, (err as Error).message);
+    }
+
+    // Get guild configuration from database
+    const guildConfig = await DatabaseRepository.getGuild(memberInfo.guildId);
+
+    // Send Discord notification if configured and enabled
+    if (guildConfig && guildConfig.notificationsEnabled && guildConfig.notificationChannelId) {
+      try {
+        const channel = await member.guild.channels.fetch(guildConfig.notificationChannelId).catch(() => null);
+        if (channel && channel.isTextBased()) {
+          const textChannel = channel as TextChannel;
+
+          // Verify permissions before sending
+          const permissions = textChannel.permissionsFor(member.guild.members.me || member.client.user.id);
+          if (permissions && permissions.has(PermissionFlagsBits.SendMessages) && permissions.has(PermissionFlagsBits.EmbedLinks)) {
+            const embed = buildDiscordJoinEmbed(memberInfo);
+            await textChannel.send({ embeds: [embed] });
+            Logger.info(`Sent Discord join notification for ${memberInfo.username} in channel ${textChannel.id}`);
+          } else {
+            Logger.warn(`Missing permissions (SendMessages/EmbedLinks) to send notification in channel ${guildConfig.notificationChannelId}`);
+          }
+        } else {
+          Logger.warn(`Notification channel ${guildConfig.notificationChannelId} not found or not text-based`);
+        }
+      } catch (err) {
+        Logger.error(`Failed to send Discord join notification:`, (err as Error).message);
+      }
+    }
+
+    // Forward notification to Telegram owner asynchronously and safely
+    try {
+      await TelegramService.notifyOwnerOfJoin(memberInfo);
+    } catch (err) {
+      Logger.error(`Telegram notification error (Discord processing continues):`, (err as Error).message);
+    }
+
+    return true;
+  }
+}
