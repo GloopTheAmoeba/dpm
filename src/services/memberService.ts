@@ -1,8 +1,7 @@
-import { GuildMember, TextChannel, PermissionFlagsBits, Role } from 'discord.js';
+import { GuildMember, Role } from 'discord.js';
 import { DatabaseRepository } from '../database/repository.js';
 import { TelegramService } from './telegramService.js';
 import { DiscordMemberInfo } from '../types/index.js';
-import { buildDiscordJoinEmbed } from '../formatters/discordNotification.js';
 import { Logger } from '../utils/logger.js';
 
 export class MemberService {
@@ -41,7 +40,7 @@ export class MemberService {
   }
 
   /**
-   * Process a member join event idempotently, persist data, send Discord notification, and notify Telegram owner.
+   * Process a member join event idempotently, persist data in PostgreSQL, and notify Telegram owner.
    */
   static async processMemberJoin(member: GuildMember): Promise<boolean> {
     const memberInfo = this.extractMemberInfo(member);
@@ -69,33 +68,6 @@ export class MemberService {
       await DatabaseRepository.upsertMember(memberInfo);
     } catch (err) {
       Logger.error(`Failed to save member ${memberInfo.discordUserId} to database:`, (err as Error).message);
-    }
-
-    // Get guild configuration from database
-    const guildConfig = await DatabaseRepository.getGuild(memberInfo.guildId);
-
-    // Send Discord notification if configured and enabled
-    if (guildConfig && guildConfig.notificationsEnabled && guildConfig.notificationChannelId) {
-      try {
-        const channel = await member.guild.channels.fetch(guildConfig.notificationChannelId).catch(() => null);
-        if (channel && channel.isTextBased()) {
-          const textChannel = channel as TextChannel;
-
-          // Verify permissions before sending
-          const permissions = textChannel.permissionsFor(member.guild.members.me || member.client.user.id);
-          if (permissions && permissions.has(PermissionFlagsBits.SendMessages) && permissions.has(PermissionFlagsBits.EmbedLinks)) {
-            const embed = buildDiscordJoinEmbed(memberInfo);
-            await textChannel.send({ embeds: [embed] });
-            Logger.info(`Sent Discord join notification for ${memberInfo.username} in channel ${textChannel.id}`);
-          } else {
-            Logger.warn(`Missing permissions (SendMessages/EmbedLinks) to send notification in channel ${guildConfig.notificationChannelId}`);
-          }
-        } else {
-          Logger.warn(`Notification channel ${guildConfig.notificationChannelId} not found or not text-based`);
-        }
-      } catch (err) {
-        Logger.error(`Failed to send Discord join notification:`, (err as Error).message);
-      }
     }
 
     // Forward notification to Telegram owner asynchronously and safely

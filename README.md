@@ -1,18 +1,17 @@
 # Discord + Telegram Personal Information Bot
 
-A production-quality, personal backend integration bot that connects Discord servers and Telegram
+A production-quality, personal backend integration bot that connects Discord servers as an event/data source and Telegram as the sole notification and management interface.
 
-This is a backend service with **no Web UI, dashboard, or frontend**. The user interface operates entirely through Discord Slash Commands and Telegram bot commands / messages.
+This is a backend service with **no Web UI, dashboard, frontend, or Discord channel notifications**. Discord serves strictly as a data/event source via Gateway. All notifications and user commands are handled exclusively via Telegram.
 
 ---
 
 ## 🚀 Features
 
-- **Discord Member Join Monitoring**: Listens to Discord Gateway `GUILD_MEMBER_ADD` events across multiple guilds.
-- **Rich Information Collection**: Gathers Discord User ID, username, display name, global name, server nickname, mention, avatar URL, bot flag, exact creation timestamp, exact join timestamp, guild ID, guild name, member count, and roles.
+- **Discord Gateway Data/Event Source**: Listens to Discord Gateway `GUILD_MEMBER_ADD` events across multiple connected guilds.
+- **Rich Member Information Collection**: Gathers Discord User ID, username, display name, global name, server nickname, avatar URL, bot flag, exact creation timestamp, exact join timestamp, guild ID, guild name, member count, and roles.
 - **Calendar-Aware Account Age**: Formats account age as exact human-readable calendar durations (e.g., `5 years, 11 months, 14 days`), retaining exact UTC creation timestamps separately.
-- **Discord Embed Notifications**: Posts a formatted join notification in the server's configured notification channel.
-- **Telegram Direct Owner Alerts**: Instantly forwards join alerts to the configured `TELEGRAM_OWNER_ID` via Telegram Bot API.
+- **Telegram Direct Owner Alerts**: Instantly forwards join alerts directly to the configured `TELEGRAM_OWNER_ID` via Telegram Bot API.
 - **Idempotency & Deduplication**: Prevents duplicate notification events if Gateway re-delivers member join events.
 - **Telegram Remote Management**: Allows the authorized Telegram owner to run commands (`/start`, `/help`, `/status`, `/servers`, `/info <discord_user_id>`).
 - **Strict Telegram Authorization**: Restricts administrative commands exclusively to `TELEGRAM_OWNER_ID` by numeric Telegram user ID.
@@ -25,23 +24,27 @@ This is a backend service with **no Web UI, dashboard, or frontend**. The user i
 ```
                                ┌─────────────────────────┐
                                │     Discord Gateway     │
+                               │   (Event/Data Source)   │
                                └────────────┬────────────┘
                                             │ GUILD_MEMBER_ADD
                                             ▼
-┌─────────────────────────┐    ┌─────────────────────────┐    ┌─────────────────────────┐
-│  Telegram Bot API       │◄───│  Member Processing      │───►│  Discord Guild Channel  │
-│  (Owner Notification)   │    │  & Deduplication        │    │  (Embed Notification)   │
-└─────────────────────────┘    └────────────┬────────────┘    └─────────────────────────┘
-                                            │
-                                            ▼
                                ┌─────────────────────────┐
-                               │   PostgreSQL Database   │
-                               └─────────────────────────┘
-                                            ▲
-┌─────────────────────────┐                 │
-│ Telegram Webhook Router │─────────────────┘
-│ (POST /api/telegram/..) │
-└─────────────────────────┘
+                               │  Member Processing      │
+                               │  & Deduplication        │
+                               └────────────┬────────────┘
+                                            │
+                     ┌──────────────────────┴──────────────────────┐
+                     ▼                                             ▼
+        ┌─────────────────────────┐                   ┌─────────────────────────┐
+        │   PostgreSQL Database   │                   │  Telegram Bot API       │
+        │   (Members & Guilds)    │                   │  (Owner Notification)   │
+        └─────────────────────────┘                   └─────────────────────────┘
+                     ▲                                             ▲
+                     │                                             │
+                     └───────── ┌─────────────────────────┐ ───────┘
+                                │ Telegram Webhook Router │
+                                │ (POST /api/telegram/..) │
+                                └─────────────────────────┘
 ```
 
 The application is cleanly modularized under `src/`:
@@ -49,8 +52,8 @@ The application is cleanly modularized under `src/`:
 - `src/database/`: PostgreSQL connection pool, schema migrations runner, and repository.
 - `src/discord/`: Discord Gateway client and event listeners.
 - `src/telegram/`: Telegram Bot API wrapper, webhook registration, and diagnostics.
-- `src/commands/`: Handlers for Discord slash commands and Telegram bot commands.
-- `src/formatters/`: Notification formatters for Discord embeds and Telegram messages.
+- `src/commands/`: Handlers for Telegram bot commands (`/start`, `/help`, `/status`, `/servers`, `/info`).
+- `src/formatters/`: Notification formatters for Telegram HTML messages.
 - `src/services/`: Core business logic (`MemberService`, `DiscordService`, `TelegramService`).
 - `src/http/`: Node.js HTTP server exposing `/health`, `/ready`, and webhook route.
 - `src/utils/`: Calendar-aware account age calculator, date formatters, and redacting logger.
@@ -73,12 +76,11 @@ The application is cleanly modularized under `src/`:
 
 ## 🔒 Required Discord Permissions
 
-The bot operates on minimum permissions and **does NOT require Administrator permission**.
-When generating the bot invite link under **OAuth2 -> URL Generator**, select scope `bot` and `applications.commands`, with permissions:
+When generating the bot invite link under **OAuth2 -> URL Generator**, select scope `bot` with minimum permissions:
 - `View Channels`
-- `Send Messages`
-- `Embed Links`
 - `Read Message History`
+
+The bot does **NOT** require `Administrator` or message sending permissions on Discord as Discord is purely an event source.
 
 ---
 
@@ -87,7 +89,6 @@ When generating the bot invite link under **OAuth2 -> URL Generator**, select sc
 1. Open Telegram and search for `@BotFather`.
 2. Send `/newbot` and follow instructions to set a display name and username.
 3. Copy the HTTP API token provided by BotFather (used as `TELEGRAM_BOT_TOKEN`).
-4. (Optional) Run `/setuserpic` or `/setdescription` to customize your bot.
 
 ---
 
@@ -166,14 +167,14 @@ curl -s "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"
 
 ---
 
-## 📋 Discord Bot Setup & Slash Commands
+## 🤖 Telegram Bot Commands
 
-1. Invite the bot to your server using the generated OAuth2 URL.
-2. An authorized Server Manager/Administrator must run `/setup` in the desired channel:
-   - `/setup channel:#welcome enabled:true`
-3. View settings: `/config`
-4. Lookup a member: `/info user_id:123456789012345678`
-5. View bot status: `/status`
+The authorized owner (`TELEGRAM_OWNER_ID`) can send these commands in Telegram:
+- `/start` - Start the bot and receive welcome message.
+- `/help` - Show available commands.
+- `/status` - View detailed system status (Discord Gateway, Telegram Webhook, DB connection, uptime, member count).
+- `/servers` - List connected Discord servers and server IDs.
+- `/info <discord_user_id>` - Lookup detailed stored member information by Discord User ID.
 
 ---
 
@@ -186,8 +187,6 @@ curl -s "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"
 
 ### Discord Gateway & Intents
 - **Member join events not firing**: Ensure **Server Members Intent** is toggled ON in the Discord Developer Portal under Bot settings.
-- **Slash commands not appearing**: Wait up to 1 minute for global command propagation or re-invite the bot with `applications.commands` scope.
-- **Missing channel permissions**: Check that the bot has `Send Messages` and `Embed Links` in the configured channel.
 
 ---
 
@@ -195,6 +194,5 @@ curl -s "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo"
 
 - **Secrets Redaction**: Loggers automatically redact tokens, database passwords, and secrets.
 - **Strict Telegram User Authorization**: Checks numeric ID (`TELEGRAM_OWNER_ID`), never usernames.
-- **Discord Server Permission Verification**: `/setup` and `/config` enforce `Manage Server` permission check on the backend.
 - **Parameterized SQL**: All database queries use parameterized placeholders (`$1`, `$2`) to eliminate SQL injection risks.
-- **Minimal Discord Permissions**: No Administrator permission required.
+- **Minimal Discord Permissions**: Discord is strictly an event/data source. No Administrator or Discord channel message permissions required.

@@ -1,7 +1,6 @@
-import { Client, GatewayIntentBits, REST, Routes, Events, GuildMember, Guild } from 'discord.js';
+import { Client, GatewayIntentBits, Events, GuildMember, Guild } from 'discord.js';
 import { getConfig } from '../config/index.js';
 import { Logger } from '../utils/logger.js';
-import { discordSlashCommands, handleDiscordSlashCommand } from '../commands/discord/index.js';
 import { MemberService } from './memberService.js';
 import { DatabaseRepository } from '../database/repository.js';
 
@@ -21,27 +20,6 @@ export function getDiscordClient(): Client {
 
 export class DiscordService {
   /**
-   * Register slash commands globally with Discord REST API.
-   */
-  static async registerSlashCommands(): Promise<void> {
-    try {
-      const config = getConfig();
-      const rest = new REST({ version: '10' }).setToken(config.DISCORD_BOT_TOKEN);
-
-      Logger.info('Registering Discord slash commands...');
-      const commandData = discordSlashCommands.map((cmd) => cmd.toJSON());
-
-      await rest.put(Routes.applicationCommands(config.DISCORD_CLIENT_ID), {
-        body: commandData,
-      });
-
-      Logger.info('Successfully registered global Discord slash commands.');
-    } catch (err) {
-      Logger.error('Failed to register Discord slash commands:', (err as Error).message);
-    }
-  }
-
-  /**
    * Start Discord Gateway connection and attach event handlers.
    */
   static async startBot(): Promise<Client> {
@@ -56,13 +34,8 @@ export class DiscordService {
         await DatabaseRepository.upsertGuild({
           guildId: guild.id,
           guildName: guild.name,
-          notificationChannelId: null,
-          notificationsEnabled: true,
         }).catch((err) => Logger.error(`Failed to sync guild ${guild.id}:`, err.message));
       }
-
-      // Register slash commands asynchronously
-      await this.registerSlashCommands();
     });
 
     client.on(Events.GuildCreate, async (guild: Guild) => {
@@ -70,8 +43,6 @@ export class DiscordService {
       await DatabaseRepository.upsertGuild({
         guildId: guild.id,
         guildName: guild.name,
-        notificationChannelId: null,
-        notificationsEnabled: true,
       }).catch((err) => Logger.error(`Failed to sync newly joined guild ${guild.id}:`, err.message));
     });
 
@@ -80,21 +51,6 @@ export class DiscordService {
       await MemberService.processMemberJoin(member).catch((err) => {
         Logger.error(`Error processing GUILD_MEMBER_ADD for ${member.id}:`, err.message);
       });
-    });
-
-    client.on(Events.InteractionCreate, async (interaction) => {
-      if (!interaction.isChatInputCommand()) return;
-      try {
-        await handleDiscordSlashCommand(interaction);
-      } catch (err) {
-        Logger.error('Error handling Discord slash command:', (err as Error).message);
-        if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({
-            content: '❌ An internal error occurred while processing this command.',
-            flags: 64,
-          }).catch(() => null);
-        }
-      }
     });
 
     client.on(Events.Error, (err) => {

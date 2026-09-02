@@ -94,12 +94,9 @@ export async function handleTelegramCommand(
         return;
       }
 
-      const lines = guilds.map((g) => {
-        const notifStatus = g.notificationsEnabled && g.notificationChannelId ? `Channel: <code>${g.notificationChannelId}</code>` : 'Disabled / Not Configured';
-        return `• <b>${escapeHtml(g.guildName)}</b>\n  ID: <code>${g.guildId}</code>\n  Notifications: ${notifStatus}`;
-      });
+      const lines = guilds.map((g) => `• <b>${escapeHtml(g.guildName)}</b> (ID: <code>${g.guildId}</code>)`);
 
-      await ctx.reply(`<b>🏰 Connected Discord Servers (${guilds.length}):</b>\n\n${lines.join('\n\n')}`, {
+      await ctx.reply(`<b>🏰 Connected Discord Servers (${guilds.length}):</b>\n\n${lines.join('\n')}`, {
         parse_mode: 'HTML',
       });
       break;

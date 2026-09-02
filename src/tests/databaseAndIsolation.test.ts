@@ -14,7 +14,7 @@ describe('Database & Guild Configuration Isolation', () => {
     mockQuery.mockReset();
   });
 
-  it('9. Discord guild configuration isolation - Guild A config does not affect Guild B', async () => {
+  it('8. Discord guild storage and isolation - Guild A record does not affect Guild B', async () => {
     // Guild A setup
     mockQuery.mockResolvedValueOnce({
       rows: [
@@ -22,15 +22,13 @@ describe('Database & Guild Configuration Isolation', () => {
           id: 1,
           guildId: 'guild_A',
           guildName: 'Guild A',
-          notificationChannelId: 'channel_111',
-          notificationsEnabled: true,
         },
       ],
     });
 
-    const guildA = await DatabaseRepository.setGuildNotificationChannel('guild_A', 'Guild A', 'channel_111', true);
+    const guildA = await DatabaseRepository.upsertGuild({ guildId: 'guild_A', guildName: 'Guild A' });
     expect(guildA.guildId).toBe('guild_A');
-    expect(guildA.notificationChannelId).toBe('channel_111');
+    expect(guildA.guildName).toBe('Guild A');
 
     // Guild B query
     mockQuery.mockResolvedValueOnce({
@@ -39,19 +37,16 @@ describe('Database & Guild Configuration Isolation', () => {
           id: 2,
           guildId: 'guild_B',
           guildName: 'Guild B',
-          notificationChannelId: 'channel_222',
-          notificationsEnabled: false,
         },
       ],
     });
 
     const guildB = await DatabaseRepository.getGuild('guild_B');
     expect(guildB?.guildId).toBe('guild_B');
-    expect(guildB?.notificationChannelId).toBe('channel_222');
-    expect(guildB?.notificationsEnabled).toBe(false);
+    expect(guildB?.guildName).toBe('Guild B');
   });
 
-  it('10. Duplicate join-event protection (idempotency)', async () => {
+  it('9. Duplicate join-event protection (idempotency)', async () => {
     // First insertion succeeds (1 row inserted)
     mockQuery.mockResolvedValueOnce({ rowCount: 1 });
     const firstAttempt = await DatabaseRepository.logEventIdempotent({
@@ -73,7 +68,7 @@ describe('Database & Guild Configuration Isolation', () => {
     expect(secondAttempt).toBe(false);
   });
 
-  it('11. Database constraint handling', async () => {
+  it('10. Database constraint handling', async () => {
     mockQuery.mockRejectedValueOnce(new Error('duplicate key value violates unique constraint "uq_guild_member"'));
 
     await expect(

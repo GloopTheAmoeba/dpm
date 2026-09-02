@@ -6,32 +6,19 @@ import { GuildMember } from 'discord.js';
 import { DiscordMemberInfo } from '../types/index.js';
 
 describe('Discord Event Processing & Telegram Resilience', () => {
-  it('14. Discord event processing & 15. Telegram failure does not crash Discord processing', async () => {
+  it('13. Discord event processing & 14. Telegram failure does not crash Discord processing', async () => {
     // Mock Database Repository functions
     vi.spyOn(DatabaseRepository, 'logEventIdempotent').mockResolvedValue(true);
     vi.spyOn(DatabaseRepository, 'upsertMember').mockResolvedValue({} as DiscordMemberInfo);
     vi.spyOn(DatabaseRepository, 'getGuild').mockResolvedValue({
       guildId: 'guild_123',
       guildName: 'Test Guild',
-      notificationChannelId: 'channel_456',
-      notificationsEnabled: true,
     });
 
     // Mock Telegram notification to simulate failure
     const telegramSpy = vi
       .spyOn(TelegramService, 'notifyOwnerOfJoin')
       .mockRejectedValue(new Error('Telegram API connection timeout'));
-
-    // Mock Discord GuildMember
-    const mockSend = vi.fn().mockResolvedValue({});
-    const mockTextChannel = {
-      isTextBased: () => true,
-      permissionsFor: () => ({
-        has: () => true,
-      }),
-      send: mockSend,
-      id: 'channel_456',
-    };
 
     const mockMember = {
       id: 'user_789',
@@ -53,12 +40,6 @@ describe('Discord Event Processing & Telegram Resilience', () => {
         id: 'guild_123',
         name: 'Test Guild',
         memberCount: 50,
-        channels: {
-          fetch: async () => mockTextChannel,
-        },
-        members: {
-          me: { id: 'bot_id' },
-        },
       },
       roles: {
         cache: new Map(),
@@ -72,10 +53,7 @@ describe('Discord Event Processing & Telegram Resilience', () => {
     // 1. Process returned true indicating success
     expect(result).toBe(true);
 
-    // 2. Discord notification was sent
-    expect(mockSend).toHaveBeenCalledOnce();
-
-    // 3. Telegram notify attempted and failed, but did not crash or abort Discord processing
+    // 2. Telegram notify attempted and failed, but did not crash or abort processing
     expect(telegramSpy).toHaveBeenCalledOnce();
   });
 });

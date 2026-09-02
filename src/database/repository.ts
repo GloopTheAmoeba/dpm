@@ -12,48 +12,15 @@ export class DatabaseRepository {
   static async upsertGuild(guild: DiscordGuildConfig): Promise<DiscordGuildConfig> {
     const pool = getPool();
     const query = `
-      INSERT INTO discord_guilds (guild_id, guild_name, notification_channel_id, notifications_enabled, updated_at)
-      VALUES ($1, $2, $3, $4, NOW())
+      INSERT INTO discord_guilds (guild_id, guild_name, updated_at)
+      VALUES ($1, $2, NOW())
       ON CONFLICT (guild_id) DO UPDATE SET
         guild_name = EXCLUDED.guild_name,
-        notification_channel_id = COALESCE(EXCLUDED.notification_channel_id, discord_guilds.notification_channel_id),
-        notifications_enabled = EXCLUDED.notifications_enabled,
         updated_at = NOW()
       RETURNING id, guild_id AS "guildId", guild_name AS "guildName",
-                notification_channel_id AS "notificationChannelId",
-                notifications_enabled AS "notificationsEnabled",
                 created_at AS "createdAt", updated_at AS "updatedAt";
     `;
-    const res = await pool.query(query, [
-      guild.guildId,
-      guild.guildName,
-      guild.notificationChannelId,
-      guild.notificationsEnabled,
-    ]);
-    return res.rows[0];
-  }
-
-  static async setGuildNotificationChannel(
-    guildId: string,
-    guildName: string,
-    channelId: string | null,
-    enabled: boolean = true,
-  ): Promise<DiscordGuildConfig> {
-    const pool = getPool();
-    const query = `
-      INSERT INTO discord_guilds (guild_id, guild_name, notification_channel_id, notifications_enabled, updated_at)
-      VALUES ($1, $2, $3, $4, NOW())
-      ON CONFLICT (guild_id) DO UPDATE SET
-        guild_name = EXCLUDED.guild_name,
-        notification_channel_id = $3,
-        notifications_enabled = $4,
-        updated_at = NOW()
-      RETURNING id, guild_id AS "guildId", guild_name AS "guildName",
-                notification_channel_id AS "notificationChannelId",
-                notifications_enabled AS "notificationsEnabled",
-                created_at AS "createdAt", updated_at AS "updatedAt";
-    `;
-    const res = await pool.query(query, [guildId, guildName, channelId, enabled]);
+    const res = await pool.query(query, [guild.guildId, guild.guildName]);
     return res.rows[0];
   }
 
@@ -61,8 +28,6 @@ export class DatabaseRepository {
     const pool = getPool();
     const query = `
       SELECT id, guild_id AS "guildId", guild_name AS "guildName",
-             notification_channel_id AS "notificationChannelId",
-             notifications_enabled AS "notificationsEnabled",
              created_at AS "createdAt", updated_at AS "updatedAt"
       FROM discord_guilds
       WHERE guild_id = $1;
@@ -75,8 +40,6 @@ export class DatabaseRepository {
     const pool = getPool();
     const query = `
       SELECT id, guild_id AS "guildId", guild_name AS "guildName",
-             notification_channel_id AS "notificationChannelId",
-             notifications_enabled AS "notificationsEnabled",
              created_at AS "createdAt", updated_at AS "updatedAt"
       FROM discord_guilds
       ORDER BY guild_name ASC;
@@ -93,8 +56,6 @@ export class DatabaseRepository {
     await this.upsertGuild({
       guildId: member.guildId,
       guildName: member.guildName || member.guildId,
-      notificationChannelId: null,
-      notificationsEnabled: true,
     });
 
     const query = `

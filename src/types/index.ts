@@ -2,8 +2,6 @@ export interface DiscordGuildConfig {
   id?: number;
   guildId: string;
   guildName: string;
-  notificationChannelId: string | null;
-  notificationsEnabled: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -35,17 +33,6 @@ export interface TelegramUserRecord {
   isAuthorized: boolean;
   createdAt?: Date;
   lastSeenAt?: Date;
-}
-
-export interface BotEventRecord {
-  id?: number;
-  eventId?: string | null;
-  eventType: string;
-  guildId?: string | null;
-  discordUserId?: string | null;
-  telegramUserId?: number | null;
-  details?: Record<string, unknown> | null;
-  createdAt?: Date;
 }
 
 export interface BotStatusInfo {
