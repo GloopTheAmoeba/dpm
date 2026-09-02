@@ -1,6 +1,6 @@
 # Discord + Telegram Personal Information Bot
 
-A production-quality, personal backend integration bot that connects Discord servers and Telegram.
+A production-quality, personal backend integration bot that connects Discord servers and Telegram
 
 This is a backend service with **no Web UI, dashboard, or frontend**. The user interface operates entirely through Discord Slash Commands and Telegram bot commands / messages.
 
