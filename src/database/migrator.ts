@@ -24,15 +24,30 @@ export async function runMigrations(): Promise<void> {
     `);
 
     const res = await client.query('SELECT version FROM schema_migrations ORDER BY version ASC');
-    const appliedVersions = new Set<number>(res.rows.map((row) => row.version));
+    const appliedVersions = new Set<number>(res.rows.map((row: { version: number }) => row.version));
 
-    const migrationsDir = path.join(__dirname, 'migrations');
-    if (!fs.existsSync(migrationsDir)) {
-      Logger.warn(`Migrations directory not found at ${migrationsDir}`);
+    // Check dist/database/migrations, src/database/migrations, or process.cwd()/src/database/migrations
+    const candidates = [
+      path.join(__dirname, 'migrations'),
+      path.join(process.cwd(), 'dist', 'database', 'migrations'),
+      path.join(process.cwd(), 'src', 'database', 'migrations'),
+    ];
+
+    let migrationsDir: string | null = null;
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        migrationsDir = candidate;
+        break;
+      }
+    }
+
+    if (!migrationsDir) {
+      Logger.warn(`Migrations directory not found in candidates: ${candidates.join(', ')}`);
       await client.query('COMMIT');
       return;
     }
 
+    Logger.info(`Using migrations directory: ${migrationsDir}`);
     const files = fs.readdirSync(migrationsDir).sort();
 
     for (const file of files) {

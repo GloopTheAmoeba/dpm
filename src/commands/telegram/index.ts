@@ -1,9 +1,11 @@
 import { Context } from 'grammy';
 import { TelegramService } from '../../services/telegramService.js';
 import { DatabaseRepository } from '../../database/repository.js';
+import { getDiscordClient } from '../../services/discordService.js';
 import { Logger } from '../../utils/logger.js';
 import { calculateAccountAge } from '../../utils/accountAge.js';
 import { formatExactUtc } from '../../utils/date.js';
+import { DiscordMemberInfo } from '../../types/index.js';
 
 async function recordUserAndCheckAuth(ctx: Context): Promise<boolean> {
   const from = ctx.from;
@@ -103,19 +105,77 @@ export async function handleTelegramCommand(
     }
 
     case '/info': {
-      const targetUserId = args[0];
+      const targetUserId = args[0]?.trim();
       if (!targetUserId) {
-        await ctx.reply('⚠️ Please provide a Discord user ID.\nUsage: <code>/info &lt;discord_user_id&gt;</code>', {
+        await ctx.reply('⚠️ Please provide a Discord user ID.\n\nUsage: <code>/info &lt;discord_user_id&gt;</code>', {
           parse_mode: 'HTML',
         });
         return;
       }
 
-      const member = await DatabaseRepository.getMemberByDiscordId(targetUserId);
+      if (!/^\d{17,20}$/.test(targetUserId)) {
+        await ctx.reply(
+          `❌ Invalid Discord User ID format: <code>${escapeHtml(targetUserId)}</code>.\nDiscord User IDs must be 17 to 20 numeric digits.`,
+          { parse_mode: 'HTML' }
+        );
+        return;
+      }
+
+      let member: DiscordMemberInfo | null = await DatabaseRepository.getMemberByDiscordId(targetUserId);
+
+      // If not in database or to refresh live info, query Discord API directly if ready
+      const discordClient = getDiscordClient();
+      if (discordClient.isReady()) {
+        try {
+          const user = await discordClient.users.fetch(targetUserId).catch(() => null);
+          if (user) {
+            // Find if user is in any connected guild
+            let matchedGuildName = 'Global Discord User';
+            let matchedGuildId = member?.guildId || discordClient.guilds.cache.first()?.id || '0';
+            let memberCount: number | undefined = undefined;
+            let nickname: string | null = null;
+            let joinedAt = member?.lastJoinedAt || new Date();
+
+            for (const guild of discordClient.guilds.cache.values()) {
+              const fetchedMember = await guild.members.fetch(user.id).catch(() => null);
+              if (fetchedMember) {
+                matchedGuildName = guild.name;
+                matchedGuildId = guild.id;
+                memberCount = guild.memberCount;
+                nickname = fetchedMember.nickname || null;
+                joinedAt = fetchedMember.joinedAt || joinedAt;
+                break;
+              }
+            }
+
+            const liveMemberInfo: DiscordMemberInfo = {
+              guildId: matchedGuildId,
+              guildName: matchedGuildName,
+              discordUserId: user.id,
+              username: user.username,
+              displayName: user.displayName || user.username,
+              globalName: user.globalName || null,
+              nickname: nickname,
+              avatarUrl: user.displayAvatarURL({ extension: 'png', size: 256 }) || null,
+              isBot: user.bot,
+              accountCreatedAt: user.createdAt,
+              lastJoinedAt: joinedAt,
+              memberCount: memberCount,
+            };
+
+            await DatabaseRepository.upsertMember(liveMemberInfo).catch(() => null);
+            member = liveMemberInfo;
+          }
+        } catch (err) {
+          Logger.warn(`Discord user fetch error for ${targetUserId}:`, (err as Error).message);
+        }
+      }
+
       if (!member) {
-        await ctx.reply(`❌ No stored information found for Discord User ID: <code>${escapeHtml(targetUserId)}</code>`, {
-          parse_mode: 'HTML',
-        });
+        await ctx.reply(
+          `❌ No Discord user or stored member found for ID: <code>${escapeHtml(targetUserId)}</code>.\n\nPlease verify the user ID is correct and that the user exists on Discord.`,
+          { parse_mode: 'HTML' }
+        );
         return;
       }
 
